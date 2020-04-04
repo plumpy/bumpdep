@@ -30,15 +30,15 @@ class BumpDep : CliktCommand() {
     private val logger = KotlinLogging.logger {}
 
     companion object {
-        val TAG_REGEX = Regex("""refs/tags/v((?:\d+\.)+(?:\d+))""")
+        val REF_REGEX = Regex("""refs/tags/v((?:\d+\.)+(?:\d+))""")
         const val GITHUB_OAUTH_TOKEN_ENV_NAME = "GITHUB_OAUTH"
     }
 
-    private val version by option("--tag", help = "the release tag triggering this dependency bump").convert { tag ->
-        val tagMatcher = TAG_REGEX.matchEntire(tag)
-            ?: fail("Tag '$tag' is not a valid release tag")
+    private val version by option("--ref", help = "the release tag triggering this dependency bump").convert { ref ->
+        val tagMatcher = REF_REGEX.matchEntire(ref)
+            ?: fail("Ref '$ref' is not a valid release ref")
         val version = tagMatcher.groups[1]?.value
-            ?: fail("Couldn't extract version from '$tag'")
+            ?: fail("Couldn't extract version from '$ref'")
         version
     }.required()
 
@@ -56,8 +56,8 @@ class BumpDep : CliktCommand() {
         .required()
 
     private val reviewers by option(help = "the comma-separated list of reviewers (prefixed with 'team:' for a team) for the pull request")
-        .split(",")
-        .default(listOf())
+        .convert { it.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet() }
+        .default(setOf())
 
     override fun run() {
         if (!System.getenv().containsKey(GITHUB_OAUTH_TOKEN_ENV_NAME)) {
@@ -164,27 +164,25 @@ class BumpDep : CliktCommand() {
 
         pr.addLabels(branchName)
 
-            val (users, teams) = getReviewers()
-            if (users.isNotEmpty()) {
-                logger.info { "adding reviewers: $users"}
-                pr.requestReviewers(users.map { github.getUser(it) })
-            }
-            if (teams.isNotEmpty()) {
-                logger.info { "adding team reviewers: $teams"}
-                val upstreamOrg = github.getOrganization(upstreamOwner)
-                pr.requestTeamReviewers(teams.map { upstreamOrg.getTeamByName(it) })
-            }
+        val (users, teams) = getReviewers()
+        if (users.isNotEmpty()) {
+            logger.info { "adding reviewers: $users" }
+            pr.requestReviewers(users.map { github.getUser(it) })
+        }
+        if (teams.isNotEmpty()) {
+            logger.info { "adding team reviewers: $teams" }
+            val upstreamOrg = github.getOrganization(upstreamOwner)
+            pr.requestTeamReviewers(teams.map { upstreamOrg.getTeamByName(it) })
+        }
 
         logger.info { "Created pull request for $repoName: ${pr.htmlUrl}" }
     }
 
     data class Reviewers(val users: Set<String>, val teams: Set<String>)
     private fun getReviewers(): Reviewers {
-        val nonBlankReviewers = reviewers.filter { it.isBlank() }
-        // TODO(plumpy): we have to subtract before removing the prefix
-        val teams = nonBlankReviewers.filter { it.startsWith("team:") }.map { it.removePrefix("team:") }.toSet()
-        val users = nonBlankReviewers.toSet() - teams
-        return Reviewers(users, teams)
+        val teams = reviewers.filter { it.startsWith("team:") }.toSet()
+        val users = reviewers - teams
+        return Reviewers(users, teams.map { it.removePrefix("team:") }.toSet())
     }
 
     private fun waitForResults(results: MutableMap<String, Future<*>>): Boolean {

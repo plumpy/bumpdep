@@ -1,8 +1,8 @@
 name: 'Bump Spinnaker Dependencies'
 description: 'Bump dependencies in external repositories upon a release'
 inputs:
-  tag:
-    description: 'the release tag triggering this dependency bump'
+  ref:
+    description: 'the release ref triggering this dependency bump'
     required: true
   key:
     description: 'The gradle.properties key to modify'
@@ -26,8 +26,8 @@ runs:
   using: 'docker'
   image: 'Dockerfile'
   args:
-  - '--tag'
-  - ${{ inputs.tag }}
+  - '--ref'
+  - ${{ inputs.ref }}
   - '--key'
   - ${{ inputs.key }}
   - '--repositories'
