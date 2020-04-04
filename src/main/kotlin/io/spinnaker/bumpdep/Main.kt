@@ -164,23 +164,26 @@ class BumpDep : CliktCommand() {
 
         pr.addLabels(branchName)
 
-        if (reviewers.isNotEmpty()) {
             val (users, teams) = getReviewers()
-            pr.requestReviewers(users.map { github.getUser(it) })
+            if (users.isNotEmpty()) {
+                logger.info { "adding reviewers: $users"}
+                pr.requestReviewers(users.map { github.getUser(it) })
+            }
             if (teams.isNotEmpty()) {
+                logger.info { "adding team reviewers: $teams"}
                 val upstreamOrg = github.getOrganization(upstreamOwner)
                 pr.requestTeamReviewers(teams.map { upstreamOrg.getTeamByName(it) })
             }
-        }
 
         logger.info { "Created pull request for $repoName: ${pr.htmlUrl}" }
     }
 
     data class Reviewers(val users: Set<String>, val teams: Set<String>)
     private fun getReviewers(): Reviewers {
+        val nonBlankReviewers = reviewers.filter { it.isBlank() }
         // TODO(plumpy): we have to subtract before removing the prefix
-        val teams = reviewers.filter { it.startsWith("team:") }.map { it.removePrefix("team:") }.toSet()
-        val users = reviewers.toSet() - teams
+        val teams = nonBlankReviewers.filter { it.startsWith("team:") }.map { it.removePrefix("team:") }.toSet()
+        val users = nonBlankReviewers.toSet() - teams
         return Reviewers(users, teams)
     }
 
