@@ -181,7 +181,7 @@ class BumpDep : CliktCommand() {
         // TODO(plumpy): we have to subtract before removing the prefix
         val teams = reviewers.filter { it.startsWith("team:") }.map { it.removePrefix("team:") }.toSet()
         val users = reviewers.toSet() - teams
-        return Reviewers(teams, users)
+        return Reviewers(users, teams)
     }
 
     private fun waitForResults(results: MutableMap<String, Future<*>>): Boolean {
