@@ -1,4 +1,4 @@
-package io.spinnaker.bumpdep
+package io.spinnaker.bumpdeps
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.UsageError
@@ -25,21 +25,20 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 import org.kohsuke.github.GHIssueState
 import org.kohsuke.github.GitHubBuilder
 
-class BumpDep : CliktCommand() {
+class BumpDeps : CliktCommand() {
 
     private val logger = KotlinLogging.logger {}
 
     companion object {
-        val REF_REGEX = Regex("""refs/tags/v((?:\d+\.)+(?:\d+))""")
+        val REF_PREFIX = "refs/tags/v"
         const val GITHUB_OAUTH_TOKEN_ENV_NAME = "GITHUB_OAUTH"
     }
 
-    private val version by option("--ref", help = "the release tag triggering this dependency bump").convert { ref ->
-        val tagMatcher = REF_REGEX.matchEntire(ref)
-            ?: fail("Ref '$ref' is not a valid release ref")
-        val version = tagMatcher.groups[1]?.value
-            ?: fail("Couldn't extract version from '$ref'")
-        version
+    private val version by option("--ref", help = "the release ref triggering this dependency bump").convert { ref ->
+        if (!ref.startsWith(REF_PREFIX)) {
+            fail("Ref '$ref' is not a valid release ref")
+        }
+        ref.removePrefix(REF_PREFIX)
     }.required()
 
     private val key by option(help = "the key in gradle.properties to modify")
@@ -56,16 +55,18 @@ class BumpDep : CliktCommand() {
         .required()
 
     private val reviewers by option(help = "the comma-separated list of reviewers (prefixed with 'team:' for a team) for the pull request")
-        .convert { it.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet() }
-        .default(setOf())
+        .convert { convertReviewersArg(it) }
+        .default(Reviewers())
 
-    override fun run() {
-        if (!System.getenv().containsKey(GITHUB_OAUTH_TOKEN_ENV_NAME)) {
+    private val oauthToken by lazy {
+        val oauthToken = System.getenv(GITHUB_OAUTH_TOKEN_ENV_NAME)
+        if (oauthToken == null) {
             throw UsageError("A GitHub OAuth token must be provided in the $GITHUB_OAUTH_TOKEN_ENV_NAME environment variable")
         }
-        val credentialsProvider =
-            UsernamePasswordCredentialsProvider("ignored-username", System.getenv("GITHUB_OAUTH"))
+        oauthToken
+    }
 
+    override fun run() {
         val repoParent = createTempDirectory()
 
         val executor = Executors.newCachedThreadPool()
@@ -73,7 +74,7 @@ class BumpDep : CliktCommand() {
         repositories.forEach { repoName ->
             results[repoName] = executor.submit {
                 val branchName = "autobump-$key"
-                createModifiedBranch(repoParent, repoName, credentialsProvider, branchName)
+                createModifiedBranch(repoParent, repoName, branchName)
                 createPullRequest(repoName, branchName)
             }
         }
@@ -91,9 +92,11 @@ class BumpDep : CliktCommand() {
     private fun createModifiedBranch(
         repoParent: Path,
         repoName: String,
-        credentialsProvider: UsernamePasswordCredentialsProvider,
         branchName: String
     ) {
+        val credentialsProvider =
+            UsernamePasswordCredentialsProvider("ignored-username", oauthToken)
+
         val repoRoot = repoParent.resolve(repoName)
         val upstreamUri = "https://github.com/$upstreamOwner/$repoName"
         logger.info { "Cloning $upstreamUri to $repoRoot" }
@@ -141,7 +144,7 @@ class BumpDep : CliktCommand() {
     }
 
     private fun createPullRequest(repoName: String, branchName: String) {
-        val github = GitHubBuilder.fromEnvironment().build()
+        val github = GitHubBuilder().withOAuthToken(oauthToken).build()
         val githubRepo = github.getRepository("$upstreamOwner/$repoName")
 
         // If there's already an existing PR, we can just reuse it... we already force-pushed the branch, so it'll
@@ -164,22 +167,20 @@ class BumpDep : CliktCommand() {
 
         pr.addLabels(branchName)
 
-        val (users, teams) = getReviewers()
-        if (users.isNotEmpty()) {
-            logger.info { "adding reviewers: $users" }
-            pr.requestReviewers(users.map { github.getUser(it) })
+        if (reviewers.users.isNotEmpty()) {
+            pr.requestReviewers(reviewers.users.map { github.getUser(it) })
         }
-        if (teams.isNotEmpty()) {
-            logger.info { "adding team reviewers: $teams" }
+        if (reviewers.teams.isNotEmpty()) {
             val upstreamOrg = github.getOrganization(upstreamOwner)
-            pr.requestTeamReviewers(teams.map { upstreamOrg.getTeamByName(it) })
+            pr.requestTeamReviewers(reviewers.teams.map { upstreamOrg.getTeamByName(it) })
         }
 
         logger.info { "Created pull request for $repoName: ${pr.htmlUrl}" }
     }
 
-    data class Reviewers(val users: Set<String>, val teams: Set<String>)
-    private fun getReviewers(): Reviewers {
+    data class Reviewers(val users: Set<String> = setOf(), val teams: Set<String> = setOf())
+    private fun convertReviewersArg(reviewersString: String): Reviewers {
+        val reviewers = reviewersString.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
         val teams = reviewers.filter { it.startsWith("team:") }.toSet()
         val users = reviewers - teams
         return Reviewers(users, teams.map { it.removePrefix("team:") }.toSet())
@@ -200,7 +201,7 @@ class BumpDep : CliktCommand() {
     }
 
     private fun createTempDirectory(): Path {
-        val repoParent = Files.createTempDirectory("bumpdep-git-")
+        val repoParent = Files.createTempDirectory("bumpdeps-git-")
         Runtime.getRuntime().addShutdownHook(object : Thread() {
             override fun run() {
                 repoParent.toFile().deleteRecursively()
@@ -211,5 +212,5 @@ class BumpDep : CliktCommand() {
 }
 
 fun main(args: Array<String>) {
-    BumpDep().main(args)
+    BumpDeps().main(args)
 }

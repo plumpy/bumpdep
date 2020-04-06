@@ -5,15 +5,15 @@ inputs:
     description: 'the release ref triggering this dependency bump'
     required: true
   key:
-    description: 'The gradle.properties key to modify'
+    description: 'the key in gradle.properties to modify'
     required: true
   repositories:
     description: 'the comma-separated list of repository names to modify'
     required: true
   repoOwner:
-    description: 'the owner of the repositories that will be modified'
+    description: 'the owner of the repositories to modify'
     required: true
-    default: plumpy
+    default: spinnakerbot
   upstreamOwner:
     description: 'the owner of the repositories to send pull requests to'
     required: true

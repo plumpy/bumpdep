@@ -21,7 +21,7 @@ dependencies {
 }
 
 application {
-    mainClassName = "io.spinnaker.bumpdep.MainKt"
+    mainClassName = "io.spinnaker.bumpdeps.MainKt"
 }
 
 ktlint {
